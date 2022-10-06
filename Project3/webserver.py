@@ -15,22 +15,25 @@ def buildPayload(f):
 
 def buildResponse(request):
 
-    print(request)
-
-    print("Request:", request, request == "/index.html ")
-    print(f'request "{request}"')
-
     if request == '' or request == '/' or request == '/index.html':
         with open('index.html', 'r') as f:
+            print("index.html")
             Ctype = "text/html"
             payload, Clen = buildPayload(f)
             
     elif request == '/file.txt':
         with open('file.txt', 'r') as f:
+            print("file.txt")
             Ctype = "text/plain"
+            payload, Clen = buildPayload(f)
+    elif request == '/index.js':
+        with open('index.js', 'r') as f:
+            print("index.js")
+            Ctype = "text/javascript"
             payload, Clen = buildPayload(f)
     else:
         with open('missing.html', 'r') as f:
+            print("missing.html")
             Ctype = "text/html"
             payload, Clen = buildPayload(f)
 
@@ -45,8 +48,7 @@ sock.bind(("127.0.0.1", port))
 sock.listen()
 
 while True:
-    print("Waiting for connection...")
-
+    
     connect, addr = sock.accept()
 
     msg = ''
@@ -55,7 +57,7 @@ while True:
 
     while True:
 
-        msg += connect.recv(4096).decode("ISO-8859-1")
+        msg += connect.recv(2).decode("ISO-8859-1")
 
 
         if "\r\n\r\n" in msg:
@@ -63,9 +65,16 @@ while True:
 
     i = msg.find('HTTP')
 
-    response = buildResponse(msg[4:i - 1])
+    c = 0
 
-    print(msg[4:i])
+    for slash in msg[4:i - 1]:
+        if slash == '/':    
+            c += 1
+
+    if c > 1:
+        response = buildResponse('')
+    else:
+        response = buildResponse(msg[4:i - 1])
 
     connect.sendall(response.encode("ISO-8859-1"))
 
