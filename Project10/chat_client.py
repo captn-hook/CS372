@@ -12,6 +12,9 @@ from chatui import init_windows, read_command, print_message, end_windows
 #if you do this more than once, the ghost lines will stack up
 nick = None
 s = None
+maxsize = 1024
+
+packet_buffer = b''
 
 def usage():
     print("usage: chat_client.py nickname port host", file=sys.stderr)
@@ -45,11 +48,8 @@ def userin():
         msg = packit(msg)
         
         #send the command to the server
-        try:
-            s.sendall(msg)
-        except:
-            print_message("Unable to send message")
-            break
+        
+        s.sendall(msg)
 
 def packit(msg):
     
@@ -61,6 +61,36 @@ def packit(msg):
         newmsg = bytearray(n.to_bytes(2, 'big')) + msg.encode()
       
         return newmsg
+
+
+def get_next_packet(s):
+
+    global packet_buffer
+
+    data = s.recv(maxsize)
+ 
+    packet_buffer += data
+    
+    return slice_packet()
+
+def slice_packet():
+
+    global packet_buffer
+    
+    length = int.from_bytes(packet_buffer[:2], 'big')
+
+    plen = len(packet_buffer) - 2
+
+    if plen >= length:
+  
+        msg = packet_buffer[2:length+2].decode()
+ 
+        packet_buffer = packet_buffer[length+2:]
+
+        return msg
+
+    else:
+        return None
 
 def main(argv):
     global nick
@@ -84,23 +114,23 @@ def main(argv):
     # Make the client socket and connect
   
 
-    #try:
-    s.connect((host, port))
+    try:
+        s.connect((host, port))
 
-    hellomsg = {
-        "type": "hello",
-        "nick": nick
-    }
+        hellomsg = {
+            "type": "hello",
+            "nick": nick
+        }
 
-    hellomsg = packit(hellomsg)
+        hellomsg = packit(hellomsg)
 
-    s.sendall(hellomsg)
-        #s.sendall(hellomsg.encode())
-        
-    #except:
-    #    print_message("Unable to connect to server")
-    #    end_windows()
-    #    return 1
+        s.sendall(hellomsg)
+            #s.sendall(hellomsg.encode())
+            
+    except:
+        print_message("Unable to connect to server")
+        end_windows()
+        return 1
 
     
     t1 = threading.Thread(target=serverin, daemon=True)
@@ -119,23 +149,24 @@ def serverin():
         #recieve any response from the server
         
         try:
-            data = s.recv(1024)
-            data = json.loads(data.decode())
-                
-            if data["type"] == "chat" and data["nick"] != nick:
-                print_message(f"{data['nick']}: {data['message']}")
+            data = get_next_packet(s)
 
-            elif data["type"] == "join":
-                print_message(f"*** {data['nick']} has joined the chat")
+            if data != None:
+                data = json.loads(data)
+                    
+                if data["type"] == "chat" and data["nick"] != nick:
+                    print_message(f"{data['nick']}: {data['message']}")
 
-            elif data["type"] == "leave":
-                print_message(f"*** {data['nick']} has left the chat")
+                elif data["type"] == "join":
+                    print_message(f"*** {data['nick']} has joined the chat")
+
+                elif data["type"] == "leave":
+                    print_message(f"*** {data['nick']} has left the chat")
+
         except:
             print_message("Server has disconnected")
             end_windows()
             os._exit(1)
-            sys.exit(0)
-            break
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

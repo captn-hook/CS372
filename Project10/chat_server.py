@@ -11,6 +11,19 @@ server_socket = None
 
 packet_buffer = {}
 
+maxsize = 1024
+
+
+def packit(msg):
+    
+        msg = json.dumps(msg, indent=0)
+
+        n = len(msg)
+       
+        newmsg = bytearray(n.to_bytes(2, 'big')) + msg.encode()
+      
+        return newmsg
+
 def run_server(host, port):
 
     global server_socket
@@ -48,94 +61,96 @@ def run_server(host, port):
 
             else:
                 try:
-                    #receive data
-                    data = sock.recv(2)
-                    #if data bytes < 1024, then we have a full message
-                    if int.from_bytes(data, 'big') < 1024:
-                        data = sock.recv(1024)
-                        
-                        name = sock.getpeername()
+                    
+                    name = sock.getpeername()
 
-                        name = f"{name[0]}:{name[1]}"
+                    name = f"{name[0]}:{name[1]}"
 
-                        if data:
+                    data = get_next_packet(sock, name)                    
 
-                            data =  json.loads(data.decode())
+                    if data != None and data != b'' and data != '':
 
-                            if data["type"] == "hello":
-                                print(f"*** {name}: {len(data)} bytes: {data['type']}: {data['nick']}")
+                        data =  json.loads(data)
+
+                        if data["type"] == "hello":
+                            print(f"*** {name}: {len(data)} bytes: {data['type']}: {data['nick']}")
                                 
+                            try:
                                 try:
-                                    try:
-                                        key = next(key for key, value in users.items() if value == data['nick'])
-                                        print(f"*** {name}: {data['nick']} already in use by {key}")
-                                        remove(sock, sockset)
+                                    key = next(key for key, value in users.items() if value == data['nick'])
+                                    print(f"*** {name}: {data['nick']} already in use by {key}")
+                                    remove(sock, sockset)
 
-                                    except StopIteration:
-                                        n = users[name]
+                                except StopIteration:
+                                    n = users[name]
 
-                                except KeyError:
-                                    users[name] = data['nick']
-                                    packet_buffer[name] = b''
-                                    print(f"{name}: {users[name]}> connected")
-
-                                    msg = {
-                                        "type": "join",
-                                        "nick": data['nick']
-                                    }
-
-                                    for s in sockset:
-                                        if s != server_socket and s != sock:
-                                            s.sendall(json.dumps(msg, indent=0).encode())
-
-                            
-
-                            elif users[name]:
-
-                                nick = users[name]                   
-
-                                print(f"{name}: {nick}> {data['message']}")
+                            except KeyError:
+                                users[name] = data['nick']
+                                packet_buffer[name] = b''
+                                print(f"{name}: {users[name]}> connected")
 
                                 msg = {
-                                    "type": "chat",
-                                    "nick": nick,
-                                    "message": data["message"]
+                                    "type": "join",
+                                    "nick": data['nick']
                                 }
-
-                                msg = json.dumps(msg, indent=0).encode()
 
                                 for s in sockset:
                                     if s != server_socket and s != sock:
-                                        s.sendall(msg)
+                                        s.sendall(packit(msg))
 
-                        else:
-                            remove(sock, sockset, users)
+                            
 
-                except:
+                        elif users[name]:
+
+                            nick = users[name]                   
+
+                            print(f"{name}: {nick}> {data['message']}")
+
+                            msg = {
+                                "type": "chat",
+                                "nick": nick,
+                                "message": data["message"]
+                            }
+
+                            for s in sockset:
+                                if s != server_socket and s != sock:
+                                    s.sendall(packit(msg))
+
+                except Exception as e:
                     remove(sock, sockset, users)
 
 
-def get_next_word_packet(s, name):
+def get_next_packet(s, name):
 
     global packet_buffer
 
-    length = int.from_bytes(packet_buffer[:2], 'big')
+    data = s.recv(maxsize)
 
-    while len(packet_buffer) < length + WORD_LEN_SIZE:
+    if name in packet_buffer:
+        packet_buffer[name] += data
+        return slice_packet(name, packet_buffer)
+        
 
-        packet_buffer += s.recv(5)
+    else:
+        packet_buffer[name] = data
+        return slice_packet(name, packet_buffer)     
 
-        length = int.from_bytes(packet_buffer[:WORD_LEN_SIZE], 'big')
+def slice_packet(name, packet_buffer):
 
-        if len(packet_buffer) == 0:
+    length = int.from_bytes(packet_buffer[name][:2], 'big')
+    plen = len(packet_buffer[name]) - 2
 
-            return None
+    if plen >= length:
+  
+        msg = packet_buffer[name][2:length+2].decode()
+ 
+        packet_buffer[name] = packet_buffer[name][length+2:]
 
-    word = packet_buffer[:length + WORD_LEN_SIZE]
+        return msg
+    else:
+        print(f"*** {name}: {plen} bytes: incomplete")
+        return None
 
-    packet_buffer = packet_buffer[length + WORD_LEN_SIZE:]
-
-    return word
 
 def remove(sock, sockset, users=None):
     name = sock.getpeername()
@@ -153,11 +168,9 @@ def remove(sock, sockset, users=None):
                 "nick": nick
             }
 
-            msg = json.dumps(msg, indent=0).encode()
-
             for s in sockset:
                 if s != server_socket and s != sock:
-                    s.sendall(msg)
+                    s.sendall(packit(msg))
         except KeyError:
             pass    
 
@@ -176,7 +189,8 @@ def main(argv):
             host = argv[2]
         else:
             host = "localhost"
-    except:
+    except Exception as e:
+        print(e)
         usage()
         return 1
             
